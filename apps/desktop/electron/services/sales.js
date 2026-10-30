@@ -4,6 +4,7 @@ const { writeRow, getRow } = require('../lib/db');
 const { newId, nowIso, isInt, isDate, cleanText, dayBounds } = require('../lib/util');
 const {
   PAYMENT_METHODS,
+  BILL_TYPES,
   financialYear,
   needsPrescription,
   roundToRupee,
@@ -20,6 +21,7 @@ function mapSale(row, items = []) {
     id: row.id,
     invoiceNo: row.invoice_no,
     invoiceFy: row.invoice_fy,
+    billType: row.bill_type,
     customerId: row.customer_id,
     customerName: row.customer_name ?? null,
     customerGstin: row.customer_gstin ?? null,
@@ -95,11 +97,13 @@ function listSales(db, { from, to, limit = 200 } = {}) {
 }
 
 /** Invoice numbers are "<till code>/<financial year>/<serial>", as GST expects a serial per year. */
-function nextInvoice(db, deviceId, counterCode, fy) {
+function nextInvoice(db, deviceId, counterCode, fy, billType) {
   const count = db
-    .prepare('SELECT COUNT(*) AS n FROM sales WHERE device_id = ? AND invoice_fy = ?')
-    .get(deviceId, fy).n;
-  return `${counterCode}/${fy}/${count + 1}`;
+    .prepare('SELECT COUNT(*) AS n FROM sales WHERE device_id = ? AND invoice_fy = ? AND bill_type = ?')
+    .get(deviceId, fy, billType).n;
+  // Bills of supply run in their own series so the GST invoice numbers stay gap-free.
+  const series = billType === 'bill_of_supply' ? `${counterCode}/BOS` : counterCode;
+  return `${series}/${fy}/${count + 1}`;
 }
 
 function validateCart(items) {
@@ -141,6 +145,8 @@ function createSale(db, input, session) {
   validateCart(input.items);
   const paymentMethod = input.paymentMethod ?? 'cash';
   if (!PAYMENT_METHODS.includes(paymentMethod)) throw new Error('Choose a valid payment method');
+  const billType = input.billType ?? 'tax_invoice';
+  if (!BILL_TYPES.includes(billType)) throw new Error('Choose a valid bill type');
 
   return db.transaction(() => {
     const lines = input.items.map((item) => {
@@ -191,7 +197,11 @@ function createSale(db, input, session) {
         : Math.min(Math.floor((discount * p.gross) / subtotal), discountLeft);
       discountLeft -= p.discountShare;
       p.net = p.gross - p.discountShare;
-      Object.assign(p, splitInclusiveGst(p.net, p.product.gst_rate));
+      if (billType === 'bill_of_supply') {
+        Object.assign(p, { taxable: p.net, cgst: 0, sgst: 0 });
+      } else {
+        Object.assign(p, splitInclusiveGst(p.net, p.product.gst_rate));
+      }
     });
 
     const payable = subtotal - discount;
@@ -210,8 +220,9 @@ function createSale(db, input, session) {
 
     writeRow(db, 'sales', {
       id: saleId,
-      invoice_no: nextInvoice(db, session.deviceId, counterCode, fy),
+      invoice_no: nextInvoice(db, session.deviceId, counterCode, fy, billType),
       invoice_fy: fy,
+      bill_type: billType,
       device_id: session.deviceId,
       customer_id: customerId,
       cashier_name: session.cashierName,

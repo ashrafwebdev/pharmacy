@@ -6,6 +6,9 @@ const GST_RATES = [0, 5, 12, 18, 28];
 const SCHEDULES = ['OTC', 'H', 'H1', 'X'];
 const PRESCRIPTION_SCHEDULES = ['H', 'H1', 'X'];
 const PAYMENT_METHODS = ['cash', 'upi', 'card', 'credit'];
+// tax_invoice: GST shown and split. bill_of_supply: no tax charged (unregistered shop, composition
+// dealer, or nil-rated goods only). Each type has its own invoice series.
+const BILL_TYPES = ['tax_invoice', 'bill_of_supply'];
 const GSTIN_PATTERN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const HSN_PATTERN = /^\d{4}(\d{2}(\d{2})?)?$/;
 
@@ -96,6 +99,7 @@ module.exports = {
   SCHEDULES,
   PRESCRIPTION_SCHEDULES,
   PAYMENT_METHODS,
+  BILL_TYPES,
   isGstin,
   isHsn,
   needsPrescription,

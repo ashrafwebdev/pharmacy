@@ -16,7 +16,7 @@ const RX_BLANK = {
 };
 
 export default function Pos() {
-  const { notify } = useApp();
+  const { notify, settings } = useApp();
   const money = useMoney();
   const searchRef = useRef(null);
   const [query, setQuery] = useState('');
@@ -26,6 +26,8 @@ export default function Pos() {
   const [customerId, setCustomerId] = useState('');
   const [discount, setDiscount] = useState('');
   const [method, setMethod] = useState('cash');
+  // A shop without a GSTIN cannot issue GST invoices, so it defaults to a bill of supply.
+  const [billType, setBillType] = useState(null);
   const [tendered, setTendered] = useState('');
   const [rx, setRx] = useState(RX_BLANK);
   const [receipt, setReceipt] = useState(null);
@@ -64,6 +66,7 @@ export default function Pos() {
   const tenderedPaise = tendered.trim() ? toPaise(tendered) : total;
   const change = method === 'cash' && !Number.isNaN(tenderedPaise) ? tenderedPaise - total : 0;
   const needsRx = cart.some((line) => line.requiresPrescription);
+  const effectiveBillType = billType ?? (settings?.gstin ? 'tax_invoice' : 'bill_of_supply');
   const selectedCustomer = customers.find((c) => c.id === customerId);
 
   function addLine(product) {
@@ -132,6 +135,7 @@ export default function Pos() {
     setCustomerId('');
     setRx(RX_BLANK);
     setMethod('cash');
+    setBillType(null);
   }
 
   async function checkout() {
@@ -153,6 +157,7 @@ export default function Pos() {
         paymentMethod: method,
         amountPaid: method === 'cash' ? tenderedPaise : total,
         prescription: needsRx ? rx : null,
+        billType: effectiveBillType,
       });
       setReceipt(sale);
       reset();
@@ -267,6 +272,25 @@ export default function Pos() {
           <Row label="Total payable" value={money(total)} strong />
         </div>
 
+        <div className="pay-methods" role="radiogroup" aria-label="Bill type">
+          <button
+            role="radio"
+            aria-checked={effectiveBillType === 'tax_invoice'}
+            className={`chip${effectiveBillType === 'tax_invoice' ? ' active' : ''}`}
+            onClick={() => setBillType('tax_invoice')}
+          >
+            With GST
+          </button>
+          <button
+            role="radio"
+            aria-checked={effectiveBillType === 'bill_of_supply'}
+            className={`chip${effectiveBillType === 'bill_of_supply' ? ' active' : ''}`}
+            onClick={() => setBillType('bill_of_supply')}
+          >
+            Without tax
+          </button>
+        </div>
+
         <div className="pay-methods" role="radiogroup" aria-label="Payment method">
           {PAYMENTS.map((p) => (
             <button
@@ -354,7 +378,7 @@ export default function Pos() {
 
       {receipt && (
         <Modal
-          title={`Tax invoice ${receipt.invoiceNo}`}
+          title={`${receipt.billType === 'bill_of_supply' ? 'Bill of supply' : 'Tax invoice'} ${receipt.invoiceNo}`}
           onClose={() => setReceipt(null)}
           footer={
             <>

@@ -29,6 +29,7 @@ export default function Receipt({ sale }) {
   const money = useMoney();
   const breakdown = gstBreakdown(sale.items);
   const voided = sale.status === 'voided';
+  const withTax = sale.billType !== 'bill_of_supply';
 
   return (
     <div id="receipt" className="receipt">
@@ -39,7 +40,9 @@ export default function Receipt({ sale }) {
         {settings?.gstin && <div>GSTIN: {settings.gstin}</div>}
         {settings?.drugLicence20 && <div>Drug Lic. (Form 20): {settings.drugLicence20}</div>}
         {settings?.drugLicence21 && <div>Drug Lic. (Form 21): {settings.drugLicence21}</div>}
-        <div className="receipt-title">{voided ? 'VOIDED TAX INVOICE' : 'TAX INVOICE'}</div>
+        <div className="receipt-title">
+          {voided ? 'VOIDED ' : ''}{withTax ? 'TAX INVOICE' : 'BILL OF SUPPLY'}
+        </div>
       </div>
 
       <div className="receipt-meta">
@@ -66,9 +69,9 @@ export default function Receipt({ sale }) {
               <td>
                 {item.productName}
                 {item.schedule !== 'OTC' && <span className="tag">{item.schedule}</span>}
-                <div className="muted small">GST {item.gstRate}%</div>
+                {withTax && <div className="muted small">GST {item.gstRate}%</div>}
               </td>
-              <td className="mono">{item.hsnCode || '—'}</td>
+              <td className="mono">{withTax ? item.hsnCode || '—' : ''}</td>
               <td className="num">{item.qty}</td>
               <td className="num">{money(item.mrp)}</td>
               <td className="num">{money(item.lineTotal)}</td>
@@ -78,7 +81,7 @@ export default function Receipt({ sale }) {
       </table>
 
       <div className="totals">
-        <Row label="MRP value (incl. GST)" value={money(sale.subtotal)} />
+        <Row label={withTax ? 'MRP value (incl. GST)' : 'MRP value'} value={money(sale.subtotal)} />
         {sale.discount > 0 && <Row label="Discount" value={`- ${money(sale.discount)}`} />}
         {sale.roundOff !== 0 && <Row label="Round off" value={money(sale.roundOff)} />}
         <Row label="Total payable" value={money(sale.total)} strong />
@@ -88,7 +91,7 @@ export default function Receipt({ sale }) {
 
       <p className="words">{sale.totalInWords}</p>
 
-      <table className="gst-table">
+      {withTax && <table className="gst-table">
         <thead>
           <tr>
             <th>GST rate</th>
@@ -107,7 +110,8 @@ export default function Receipt({ sale }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table>}
+      {!withTax && <p className="muted small">No tax is charged on this bill.</p>}
 
       {sale.prescription && (
         <div className="rx-block">

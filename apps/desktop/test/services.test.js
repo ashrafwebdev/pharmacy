@@ -390,3 +390,38 @@ test('settings validate GSTIN and the till counter code', async () => {
   const saved = await call(api, 'settings.save', { ...base, gstin: '29aaaaa0000a1z5' });
   assert.equal(saved.gstin, '29AAAAA0000A1Z5');
 });
+
+test('a bill without tax carries no GST, uses its own series and stays out of GST returns', async () => {
+  const { api, db } = createDevice();
+  await signInAsAdmin(api);
+  const product = await addProduct(api, { mrp: RS(112), gstRate: 12 });
+  await receive(api, product.id, 'BOS1', daysFromToday(200), 10);
+
+  const taxed = await call(api, 'sales.create', { items: [{ productId: product.id, qty: 1 }], paymentMethod: 'cash', amountPaid: RS(112) });
+  const plain = await call(api, 'sales.create', {
+    items: [{ productId: product.id, qty: 1 }],
+    paymentMethod: 'cash',
+    amountPaid: RS(112),
+    billType: 'bill_of_supply',
+  });
+
+  assert.equal(taxed.billType, 'tax_invoice');
+  assert.match(taxed.invoiceNo, /^C1\/\d{2}-\d{2}\/1$/);
+  assert.equal(plain.billType, 'bill_of_supply');
+  assert.match(plain.invoiceNo, /^C1\/BOS\/\d{2}-\d{2}\/1$/, 'separate series, so GST serials have no gaps');
+  assert.equal(plain.total, RS(112));
+  assert.equal(plain.cgst, 0);
+  assert.equal(plain.sgst, 0);
+  assert.equal(plain.taxableValue, plain.total);
+
+  const range = { from: daysFromToday(-1), to: daysFromToday(0) };
+  const gst = await call(api, 'reports.gstSummary', range);
+  assert.equal(gst[0].total, RS(112), 'only the tax invoice appears in the GST summary');
+  const summary = await call(api, 'reports.summary', range);
+  assert.equal(summary.revenue, RS(224), 'both bills count as sales');
+
+  await assert.rejects(
+    call(api, 'sales.create', { items: [{ productId: product.id, qty: 1 }], billType: 'estimate' }),
+    /bill type/,
+  );
+});

@@ -44,6 +44,7 @@ function gstSummary(db, { from, to }) {
       SUM(si.line_total) AS total
     FROM sale_items si JOIN sales s ON s.id = si.sale_id
     WHERE si.deleted = 0 AND s.deleted = 0 AND s.status = 'completed'
+      AND s.bill_type = 'tax_invoice'
       AND s.created_at >= @start AND s.created_at < @end
     GROUP BY si.gst_rate
     ORDER BY si.gst_rate

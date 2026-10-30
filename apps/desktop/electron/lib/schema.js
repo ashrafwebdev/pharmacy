@@ -115,6 +115,7 @@ const MIGRATIONS = [
     id                  TEXT PRIMARY KEY,
     invoice_no          TEXT NOT NULL,
     invoice_fy          TEXT NOT NULL,
+    bill_type           TEXT NOT NULL DEFAULT 'tax_invoice' CHECK (bill_type IN ('tax_invoice', 'bill_of_supply')),
     device_id           TEXT NOT NULL,
     customer_id         TEXT,
     cashier_name        TEXT NOT NULL,
