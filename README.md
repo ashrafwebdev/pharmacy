@@ -12,12 +12,12 @@ An end-to-end pharmacy shop system for Windows, built for Indian retail pharmaci
 ```
 pharmacy/
 ├── apps/
-│   ├── desktop/          Electron + React app (Windows installer is built from here)
+│   ├── desktop/          Electron + React app (installers for Windows, macOS and Linux)
 │   │   ├── electron/     Main process: database, business rules, GST, sync, IPC
 │   │   ├── src/          React UI
 │   │   └── test/         Business-rule, GST, prescription and sync tests
 │   └── server/           Central sync server (Express + SQLite) and its tests
-└── .github/workflows/    CI: runs tests, builds the Windows installer
+└── .github/workflows/    CI: runs tests, builds installers for all three platforms
 ```
 
 ## What it does
@@ -80,17 +80,55 @@ cd apps/desktop && npm test   # billing rules, GST maths, MRP, round-off, prescr
                               # roles, GST and register reports, and two-device sync against the real server
 ```
 
-## Building the Windows installer
+## Building installers (Windows, macOS, Linux)
+
+Installers are built by GitHub Actions on native runners, so each platform compiles its own SQLite module.
+
+| Platform | Output | Built on |
+| --- | --- | --- |
+| Windows x64 | `PharmacySuite-Setup-<version>-x64.exe` (NSIS installer) | `windows-latest` |
+| macOS Apple Silicon | `PharmacySuite-<version>-arm64.dmg` | `macos-latest` |
+| macOS Intel | `PharmacySuite-<version>-x64.dmg` | `macos-15-intel` |
+| Linux x64 | `PharmacySuite-<version>-x86_64.AppImage` and `PharmacySuite-<version>-amd64.deb` | `ubuntu-latest` |
+
+Local builds (run the one for your OS on that OS):
 
 ```bash
 cd apps/desktop
 npm ci
-npm run dist         # writes release/Pharmacy Suite Setup x.y.z.exe
+npm run dist:win         # Windows, on Windows
+npm run dist:mac:arm64   # macOS, on a Mac (or dist:mac:x64 for Intel)
+npm run dist:linux       # Linux
 ```
 
-The GitHub Actions workflow (`.github/workflows/build.yml`) runs the tests on every push and builds the
-installer on a Windows runner, uploading it as an artifact. Before distributing, add `build/icon.ico` and
-configure code signing in `apps/desktop/electron-builder.yml`.
+**Workflow** (`.github/workflows/build.yml`):
+
+1. Every push and pull request runs the server and desktop test suites.
+2. If the tests pass, the four installer jobs run in parallel. Each uploads its files as a workflow artifact
+   (kept 30 days), available from the run page.
+3. Pushing a version tag such as `v1.0.0` also creates a GitHub Release with all installers attached and
+   generated release notes:
+
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+   The version comes from `version` in `apps/desktop/package.json`. Keep it in step with the tag.
+4. Run it manually at any time from the Actions tab (**Run workflow**).
+
+**Before you give installers to customers**
+
+- **Icon:** `apps/desktop/build/icon.png` (512×512) is a placeholder. Replace it with your logo. electron-builder
+  generates the Windows `.ico` and macOS `.icns` from it.
+- **Windows code signing:** unsigned installers trigger SmartScreen warnings. Add a code-signing certificate
+  through electron-builder's `win.certificateFile` / `certificatePassword` options (store them as GitHub secrets).
+- **macOS signing and notarization:** unsigned DMGs are blocked by Gatekeeper. Users can open them with
+  right-click → Open the first time. For a smooth install, add an Apple Developer ID certificate and
+  notarization credentials as secrets and enable `mac.identity` / `notarize` in `electron-builder.yml`.
+- **Linux:** the AppImage runs on most distributions after `chmod +x`. The `.deb` is for Debian and Ubuntu.
+- **Native module check:** each build recompiles `better-sqlite3` for Electron. If a build fails there, check the
+  job log for the node-gyp step first.
 
 ## Deploying the sync server
 

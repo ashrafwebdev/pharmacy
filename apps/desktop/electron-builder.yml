@@ -1,5 +1,6 @@
 appId: com.pharmacysuite.desktop
 productName: Pharmacy Suite
+copyright: Copyright © Pharmacy Suite
 directories:
   output: release
   buildResources: build
@@ -9,14 +10,43 @@ files:
   - package.json
 asarUnpack:
   - "**/*.node"
+# Icons are generated from build/icon.png (512x512). Replace it with your logo.
+icon: build/icon.png
+
 win:
   target:
     - target: nsis
       arch:
         - x64
+  artifactName: "PharmacySuite-Setup-${version}-${arch}.${ext}"
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Pharmacy Suite
+
+mac:
+  category: public.app-category.healthcare-fitness
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  artifactName: "PharmacySuite-${version}-${arch}.${ext}"
+  # Builds are unsigned unless a Developer ID certificate is supplied (see README).
+  identity: null
+
+linux:
+  category: Office
+  maintainer: Pharmacy Suite
+  synopsis: Pharmacy billing, inventory and GST
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  artifactName: "PharmacySuite-${version}-${arch}.${ext}"

@@ -1,13 +1,18 @@
-name: Build and test
+name: Build installers
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Unit and sync tests
+    name: Tests (server + desktop)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,10 +32,39 @@ jobs:
           npm ci
           npm test
 
-  windows-installer:
-    name: Windows installer
+  installers:
+    name: ${{ matrix.label }}
     needs: test
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64 installer
+            os: windows-latest
+            script: dist:win
+            artifact: windows-x64
+            pattern: |
+              apps/desktop/release/*.exe
+          - label: macOS Apple Silicon (arm64) DMG
+            os: macos-latest
+            script: dist:mac:arm64
+            artifact: macos-arm64
+            pattern: |
+              apps/desktop/release/*.dmg
+          - label: macOS Intel (x64) DMG
+            os: macos-15-intel
+            script: dist:mac:x64
+            artifact: macos-x64
+            pattern: |
+              apps/desktop/release/*.dmg
+          - label: Linux x64 AppImage and .deb
+            os: ubuntu-latest
+            script: dist:linux
+            artifact: linux-x64
+            pattern: |
+              apps/desktop/release/*.AppImage
+              apps/desktop/release/*.deb
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,13 +72,39 @@ jobs:
           node-version: 22
       - name: Install dependencies
         working-directory: apps/desktop
+        # Electron's binary is required here, and better-sqlite3 is rebuilt for it by electron-builder.
         run: npm ci
-      - name: Build the Windows installer
+      - name: Build installer
         working-directory: apps/desktop
-        run: npm run dist
-      - name: Upload installer
+        env:
+          # Do not look for signing certificates on the runner; builds are unsigned unless configured.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run ${{ matrix.script }}
+      - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: pharmacy-suite-windows-x64
-          path: apps/desktop/release/*.exe
+          name: installers-${{ matrix.artifact }}
+          path: ${{ matrix.pattern }}
           if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: installers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: List files to publish
+        run: find installers -type f | sort
+      - name: Create release with installers
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installers/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

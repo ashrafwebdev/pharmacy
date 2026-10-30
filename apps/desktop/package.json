@@ -11,7 +11,11 @@
     "start": "vite build && electron .",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "test": "node --test",
-    "dist": "vite build && electron-builder --win --x64"
+    "dist": "vite build && electron-builder",
+    "dist:win": "vite build && electron-builder --win --x64",
+    "dist:mac:x64": "vite build && electron-builder --mac --x64",
+    "dist:mac:arm64": "vite build && electron-builder --mac --arm64",
+    "dist:linux": "vite build && electron-builder --linux --x64"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
@@ -24,5 +28,12 @@
     "electron-builder": "^26.18.0",
     "electron-rebuild": "^3.2.9",
     "vite": "^8.3.5"
-  }
+  },
+  "homepage": "https://github.com/ashrafwebdev/pharmacy",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashrafwebdev/pharmacy.git",
+    "directory": "apps/desktop"
+  },
+  "license": "UNLICENSED"
 }
