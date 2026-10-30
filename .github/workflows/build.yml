@@ -1,0 +1,50 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Unit and sync tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sync server tests
+        working-directory: apps/server
+        run: |
+          npm ci
+          npm test
+      - name: Desktop tests (includes sync against the real server)
+        working-directory: apps/desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci
+          npm test
+
+  windows-installer:
+    name: Windows installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Build the Windows installer
+        working-directory: apps/desktop
+        run: npm run dist
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: pharmacy-suite-windows-x64
+          path: apps/desktop/release/*.exe
+          if-no-files-found: error

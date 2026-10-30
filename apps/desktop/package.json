@@ -1,0 +1,28 @@
+{
+  "name": "pharmacy-desktop",
+  "productName": "Pharmacy Suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first Windows desktop app for pharmacy shops with optional cloud sync",
+  "main": "electron/main.js",
+  "author": "Pharmacy Suite",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "test": "node --test",
+    "dist": "vite build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "electron-rebuild": "^3.2.9",
+    "vite": "^8.3.5"
+  }
+}
