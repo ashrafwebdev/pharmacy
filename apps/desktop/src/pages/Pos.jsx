@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { call } from '../lib/api';
 import { useApp, useMoney } from '../lib/context';
-import { PAYMENT_LABELS, fromCents, toCents } from '../lib/format';
+import { PAYMENT_LABELS, daysAgo, fromPaise, localDateString, toPaise } from '../lib/format';
 import { Modal } from '../components/ui';
 import Receipt from '../components/Receipt';
 
-const PAYMENTS = ['cash', 'card', 'mobile'];
+const PAYMENTS = ['cash', 'upi', 'card', 'credit'];
+const RX_BLANK = {
+  doctorName: '',
+  doctorRegNo: '',
+  prescriptionNo: '',
+  prescriptionDate: localDateString(),
+  patientName: '',
+  patientAddress: '',
+};
 
 export default function Pos() {
   const { notify } = useApp();
@@ -19,7 +27,7 @@ export default function Pos() {
   const [discount, setDiscount] = useState('');
   const [method, setMethod] = useState('cash');
   const [tendered, setTendered] = useState('');
-  const [rxVerified, setRxVerified] = useState(false);
+  const [rx, setRx] = useState(RX_BLANK);
   const [receipt, setReceipt] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,13 +54,17 @@ export default function Pos() {
     };
   }, [query]);
 
-  const subtotal = cart.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
-  const discountCents = discount.trim() ? toCents(discount) : 0;
-  const validDiscount = !Number.isNaN(discountCents) && discountCents <= subtotal;
-  const total = validDiscount ? subtotal - discountCents : subtotal;
-  const tenderedCents = tendered.trim() ? toCents(tendered) : total;
-  const change = method === 'cash' && !Number.isNaN(tenderedCents) ? tenderedCents - total : 0;
-  const needsPrescription = cart.some((line) => line.requiresPrescription);
+  // Totals mirror the server: MRP is GST-inclusive, the bill is rounded to the rupee.
+  const subtotal = cart.reduce((sum, line) => sum + line.mrp * line.qty, 0);
+  const discountPaise = discount.trim() ? toPaise(discount) : 0;
+  const validDiscount = !Number.isNaN(discountPaise) && discountPaise <= subtotal;
+  const payable = validDiscount ? subtotal - discountPaise : subtotal;
+  const total = Math.round(payable / 100) * 100;
+  const roundOff = total - payable;
+  const tenderedPaise = tendered.trim() ? toPaise(tendered) : total;
+  const change = method === 'cash' && !Number.isNaN(tenderedPaise) ? tenderedPaise - total : 0;
+  const needsRx = cart.some((line) => line.requiresPrescription);
+  const selectedCustomer = customers.find((c) => c.id === customerId);
 
   function addLine(product) {
     if (product.onHand <= 0) {
@@ -72,8 +84,9 @@ export default function Pos() {
         {
           productId: product.id,
           name: product.name,
-          sku: product.sku,
-          unitPrice: product.unitPrice,
+          mrp: product.mrp,
+          gstRate: product.gstRate,
+          schedule: product.schedule,
           requiresPrescription: product.requiresPrescription,
           onHand: product.onHand,
           qty: 1,
@@ -117,30 +130,33 @@ export default function Pos() {
     setTendered('');
     setDiscount('');
     setCustomerId('');
-    setRxVerified(false);
+    setRx(RX_BLANK);
     setMethod('cash');
   }
 
   async function checkout() {
     if (cart.length === 0) return;
-    if (!validDiscount) return notify('Discount is invalid or larger than the subtotal', 'error');
-    if (Number.isNaN(tenderedCents)) return notify('Enter a valid amount tendered', 'error');
-    if (needsPrescription && !rxVerified) return notify('Verify the prescription for prescription items', 'error');
+    if (!validDiscount) return notify('Discount is invalid or larger than the MRP value', 'error');
+    if (method === 'cash' && Number.isNaN(tenderedPaise)) return notify('Enter a valid amount tendered', 'error');
     if (method === 'cash' && change < 0) return notify('Amount tendered is less than the total', 'error');
+    if (method === 'credit' && !customerId) return notify('Choose a customer for credit sales', 'error');
+    if (needsRx && (!rx.doctorName.trim() || !rx.patientName.trim() || !rx.prescriptionDate)) {
+      return notify('Fill in the prescription details for Schedule H/H1/X medicines', 'error');
+    }
 
     setBusy(true);
     try {
       const sale = await call('sales.create', {
         items: cart.map((line) => ({ productId: line.productId, qty: line.qty })),
         customerId: customerId || null,
-        discount: validDiscount ? discountCents : 0,
+        discount: validDiscount ? discountPaise : 0,
         paymentMethod: method,
-        amountPaid: method === 'cash' ? tenderedCents : total,
-        prescriptionVerified: needsPrescription ? rxVerified : false,
+        amountPaid: method === 'cash' ? tenderedPaise : total,
+        prescription: needsRx ? rx : null,
       });
       setReceipt(sale);
       reset();
-      notify(`Sale ${sale.invoiceNo} completed`);
+      notify(`Invoice ${sale.invoiceNo} saved`);
     } catch (err) {
       notify(err.message, 'error');
     } finally {
@@ -174,12 +190,15 @@ export default function Pos() {
               <strong>{product.name}</strong>
               <span className="muted">{product.genericName || product.category || product.sku || '—'}</span>
               <div className="tile-foot">
-                <span>{money(product.unitPrice)}</span>
+                <span>MRP {money(product.mrp)}</span>
                 <span className={product.onHand > 0 ? 'muted' : 'error'}>
                   {product.onHand > 0 ? `${product.onHand} in stock` : 'Out of stock'}
                 </span>
               </div>
-              {product.requiresPrescription && <span className="tag">Rx</span>}
+              <div className="tile-tags">
+                <span className="tag-soft">GST {product.gstRate}%</span>
+                {product.schedule !== 'OTC' && <span className="tag">{product.schedule}</span>}
+              </div>
             </button>
           ))}
           {query.trim() && results.length === 0 && <p className="muted">No matching products.</p>}
@@ -188,7 +207,7 @@ export default function Pos() {
       </section>
 
       <aside className="cart">
-        <h2>Current sale</h2>
+        <h2>Current bill</h2>
         {cart.length === 0 ? (
           <p className="muted cart-empty">The cart is empty.</p>
         ) : (
@@ -199,7 +218,7 @@ export default function Pos() {
                   <td>
                     <strong>{line.name}</strong>
                     <div className="muted small">
-                      {money(line.unitPrice)} each{line.requiresPrescription ? ' · Rx' : ''}
+                      {money(line.mrp)} × {line.qty}{line.schedule !== 'OTC' ? ` · ${line.schedule}` : ''}
                     </div>
                   </td>
                   <td className="num">
@@ -212,7 +231,7 @@ export default function Pos() {
                       aria-label={`Quantity of ${line.name}`}
                     />
                   </td>
-                  <td className="num">{money(line.unitPrice * line.qty)}</td>
+                  <td className="num">{money(line.mrp * line.qty)}</td>
                   <td>
                     <button className="icon-btn" onClick={() => removeLine(line.productId)} aria-label="Remove">×</button>
                   </td>
@@ -223,7 +242,7 @@ export default function Pos() {
         )}
 
         <label className="field">
-          <span>Customer (optional)</span>
+          <span>Customer</span>
           <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
             <option value="">Walk-in customer</option>
             {customers.map((c) => (
@@ -233,9 +252,9 @@ export default function Pos() {
         </label>
 
         <div className="totals">
-          <Row label="Subtotal" value={money(subtotal)} />
+          <Row label="MRP value (incl. GST)" value={money(subtotal)} />
           <label className="total-row">
-            <span>Discount</span>
+            <span>Discount (₹)</span>
             <input
               className="discount"
               value={discount}
@@ -244,7 +263,8 @@ export default function Pos() {
               inputMode="decimal"
             />
           </label>
-          <Row label="Total" value={money(total)} strong />
+          {roundOff !== 0 && validDiscount && <Row label="Round off" value={money(roundOff)} />}
+          <Row label="Total payable" value={money(total)} strong />
         </div>
 
         <div className="pay-methods" role="radiogroup" aria-label="Payment method">
@@ -264,23 +284,60 @@ export default function Pos() {
         {method === 'cash' && (
           <>
             <label className="field">
-              <span>Amount tendered</span>
+              <span>Cash received (₹)</span>
               <input
                 value={tendered}
                 onChange={(e) => setTendered(e.target.value)}
-                placeholder={fromCents(total)}
+                placeholder={fromPaise(total)}
                 inputMode="decimal"
               />
             </label>
-            <Row label="Change" value={money(Math.max(change, 0))} />
+            <Row label="Change to return" value={money(Math.max(change, 0))} />
           </>
         )}
+        {method === 'credit' && (
+          <p className="muted small">
+            {selectedCustomer ? `${selectedCustomer.name} will owe ${money(total)}.` : 'Choose a customer to record this as credit.'}
+          </p>
+        )}
 
-        {needsPrescription && (
-          <label className="check rx-check">
-            <input type="checkbox" checked={rxVerified} onChange={(e) => setRxVerified(e.target.checked)} />
-            I have verified the prescription for Rx items
-          </label>
+        {needsRx && (
+          <fieldset className="rx-box">
+            <legend>Prescription (Schedule H / H1 / X)</legend>
+            <div className="rx-grid">
+              <label className="field">
+                <span>Doctor name</span>
+                <input value={rx.doctorName} onChange={(e) => setRx({ ...rx, doctorName: e.target.value })} required />
+              </label>
+              <label className="field">
+                <span>Doctor reg. no.</span>
+                <input value={rx.doctorRegNo} onChange={(e) => setRx({ ...rx, doctorRegNo: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>Patient name</span>
+                <input value={rx.patientName} onChange={(e) => setRx({ ...rx, patientName: e.target.value })} required />
+              </label>
+              <label className="field">
+                <span>Prescription no.</span>
+                <input value={rx.prescriptionNo} onChange={(e) => setRx({ ...rx, prescriptionNo: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>Prescription date</span>
+                <input
+                  type="date"
+                  min={daysAgo(365)}
+                  max={localDateString()}
+                  value={rx.prescriptionDate}
+                  onChange={(e) => setRx({ ...rx, prescriptionDate: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="field wide">
+                <span>Patient address</span>
+                <input value={rx.patientAddress} onChange={(e) => setRx({ ...rx, patientAddress: e.target.value })} />
+              </label>
+            </div>
+          </fieldset>
         )}
 
         <button
@@ -288,16 +345,16 @@ export default function Pos() {
           onClick={checkout}
           disabled={busy || cart.length === 0}
         >
-          {busy ? 'Saving…' : `Complete sale · ${money(total)}`}
+          {busy ? 'Saving…' : `Save bill · ${money(total)}`}
         </button>
         {cart.length > 0 && (
-          <button className="btn btn-ghost btn-block" onClick={reset}>Clear sale</button>
+          <button className="btn btn-ghost btn-block" onClick={reset}>Clear bill</button>
         )}
       </aside>
 
       {receipt && (
         <Modal
-          title={`Receipt ${receipt.invoiceNo}`}
+          title={`Tax invoice ${receipt.invoiceNo}`}
           onClose={() => setReceipt(null)}
           footer={
             <>

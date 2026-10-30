@@ -12,11 +12,12 @@ function assertRange(from, to) {
 function salesSummary(db, { from, to }) {
   const bounds = assertRange(from, to);
   const totals = db.prepare(`
-    SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS revenue, COALESCE(SUM(discount), 0) AS discounts
+    SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS revenue,
+      COALESCE(SUM(discount), 0) AS discounts, COALESCE(SUM(cgst + sgst), 0) AS gst
     FROM sales
     WHERE deleted = 0 AND status = 'completed' AND created_at >= @start AND created_at < @end
   `).get(bounds);
-  const items = db.prepare(`
+  const units = db.prepare(`
     SELECT COALESCE(SUM(si.qty), 0) AS units
     FROM sale_items si JOIN sales s ON s.id = si.sale_id
     WHERE si.deleted = 0 AND s.deleted = 0 AND s.status = 'completed'
@@ -26,9 +27,47 @@ function salesSummary(db, { from, to }) {
     count: totals.count,
     revenue: totals.revenue,
     discounts: totals.discounts,
+    gstCollected: totals.gst,
     averageTicket: totals.count ? Math.round(totals.revenue / totals.count) : 0,
-    unitsSold: items.units,
+    unitsSold: units.units,
   };
+}
+
+/** GST collected per rate: the figures a GST return needs. Amounts in paise. */
+function gstSummary(db, { from, to }) {
+  const bounds = assertRange(from, to);
+  return db.prepare(`
+    SELECT si.gst_rate AS rate,
+      SUM(si.taxable_value) AS taxableValue,
+      SUM(si.cgst) AS cgst,
+      SUM(si.sgst) AS sgst,
+      SUM(si.line_total) AS total
+    FROM sale_items si JOIN sales s ON s.id = si.sale_id
+    WHERE si.deleted = 0 AND s.deleted = 0 AND s.status = 'completed'
+      AND s.created_at >= @start AND s.created_at < @end
+    GROUP BY si.gst_rate
+    ORDER BY si.gst_rate
+  `).all(bounds);
+}
+
+/** Schedule H / H1 / X dispensing record: patient, prescriber and drug per line. */
+function scheduleRegister(db, { from, to }) {
+  const bounds = assertRange(from, to);
+  return db.prepare(`
+    SELECT s.invoice_no AS invoiceNo, s.created_at AS createdAt,
+      s.rx_patient_name AS patientName, s.rx_patient_address AS patientAddress,
+      s.rx_doctor_name AS doctorName, s.rx_doctor_reg_no AS doctorRegNo,
+      s.rx_prescription_no AS prescriptionNo, s.rx_prescription_date AS prescriptionDate,
+      si.product_name AS productName, si.schedule AS schedule, si.qty AS qty,
+      b.batch_no AS batchNo
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    LEFT JOIN batches b ON b.id = si.batch_id
+    WHERE si.deleted = 0 AND s.deleted = 0 AND s.status = 'completed'
+      AND si.schedule IN ('H', 'H1', 'X')
+      AND s.created_at >= @start AND s.created_at < @end
+    ORDER BY s.created_at, s.invoice_no
+  `).all(bounds);
 }
 
 function topProducts(db, { from, to, limit = 10 }) {
@@ -69,29 +108,71 @@ function csvCell(value) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+const rupees = (paise) => (paise / 100).toFixed(2);
+
+function toCsv(header, rows) {
+  return [header.join(','), ...rows.map((row) => row.map(csvCell).join(','))].join('\n');
+}
+
 function salesCsv(db, { from, to }) {
   const bounds = assertRange(from, to);
   const rows = db.prepare(`
-    SELECT s.invoice_no, s.created_at, c.name AS customer, s.payment_method, s.subtotal,
-      s.discount, s.total, s.status, s.cashier_name
+    SELECT s.invoice_no, s.created_at, c.name AS customer, c.gstin, s.payment_method, s.subtotal,
+      s.discount, s.round_off, s.taxable_value, s.cgst, s.sgst, s.total, s.status, s.cashier_name
     FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
     WHERE s.deleted = 0 AND s.created_at >= @start AND s.created_at < @end
     ORDER BY s.created_at
   `).all(bounds);
-  const money = (cents) => (cents / 100).toFixed(2);
-  const header = ['Invoice', 'Date', 'Customer', 'Cashier', 'Payment', 'Subtotal', 'Discount', 'Total', 'Status'];
-  const lines = rows.map((r) => [
-    r.invoice_no,
-    new Date(r.created_at).toLocaleString(),
-    r.customer,
-    r.cashier_name,
-    r.payment_method,
-    money(r.subtotal),
-    money(r.discount),
-    money(r.total),
-    r.status,
-  ].map(csvCell).join(','));
-  return [header.join(','), ...lines].join('\n');
+  return toCsv(
+    ['Invoice', 'Date', 'Customer', 'Customer GSTIN', 'Cashier', 'Payment', 'MRP value', 'Discount',
+      'Round off', 'Taxable value', 'CGST', 'SGST', 'Total', 'Status'],
+    rows.map((r) => [
+      r.invoice_no,
+      new Date(r.created_at).toLocaleString('en-IN'),
+      r.customer,
+      r.gstin,
+      r.cashier_name,
+      r.payment_method,
+      rupees(r.subtotal),
+      rupees(r.discount),
+      rupees(r.round_off),
+      rupees(r.taxable_value),
+      rupees(r.cgst),
+      rupees(r.sgst),
+      rupees(r.total),
+      r.status,
+    ]),
+  );
+}
+
+function gstCsv(db, range) {
+  const rows = gstSummary(db, range);
+  return toCsv(
+    ['GST rate %', 'Taxable value', 'CGST', 'SGST', 'Total incl. GST'],
+    rows.map((r) => [r.rate, rupees(r.taxableValue), rupees(r.cgst), rupees(r.sgst), rupees(r.total)]),
+  );
+}
+
+function registerCsv(db, range) {
+  const rows = scheduleRegister(db, range);
+  return toCsv(
+    ['Date', 'Invoice', 'Patient', 'Patient address', 'Prescriber', 'Prescriber reg. no.',
+      'Prescription no.', 'Prescription date', 'Drug', 'Schedule', 'Qty', 'Batch'],
+    rows.map((r) => [
+      new Date(r.createdAt).toLocaleDateString('en-IN'),
+      r.invoiceNo,
+      r.patientName,
+      r.patientAddress,
+      r.doctorName,
+      r.doctorRegNo,
+      r.prescriptionNo,
+      r.prescriptionDate,
+      r.productName,
+      r.schedule,
+      r.qty,
+      r.batchNo,
+    ]),
+  );
 }
 
 function dashboardStats(db) {
@@ -114,4 +195,14 @@ function dashboardStats(db) {
   };
 }
 
-module.exports = { salesSummary, topProducts, dailySales, salesCsv, dashboardStats };
+module.exports = {
+  salesSummary,
+  gstSummary,
+  scheduleRegister,
+  topProducts,
+  dailySales,
+  salesCsv,
+  gstCsv,
+  registerCsv,
+  dashboardStats,
+};

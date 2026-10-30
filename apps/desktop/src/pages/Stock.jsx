@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { call, can } from '../lib/api';
 import { useApp, useMoney } from '../lib/context';
-import { formatDate, localDateString, toCents } from '../lib/format';
+import { formatDate, fromPaise, localDateString, toPaise } from '../lib/format';
 import { Empty, Field, Modal, PageHeader, StatusBadge } from '../components/ui';
 
 export default function Stock() {
   const { user, notify } = useApp();
+  const money = useMoney();
   const canWrite = can(user, 'stock.write');
   const [products, setProducts] = useState([]);
   const [batches, setBatches] = useState([]);
@@ -41,9 +42,17 @@ export default function Stock() {
 
   return (
     <>
-      <PageHeader title="Stock & Batches" subtitle="Every unit is tracked by batch and expiry date" />
+      <PageHeader title="Stock & Batches" subtitle="Every unit is tracked by batch, MRP and expiry date" />
 
-      {canWrite && <ReceiveForm products={products} onReceived={() => { notify('Stock received'); loadBatches(); }} />}
+      {canWrite && (
+        <ReceiveForm
+          products={products}
+          onReceived={() => {
+            notify('Stock received');
+            loadBatches();
+          }}
+        />
+      )}
 
       <div className="toolbar">
         <select value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)}>
@@ -67,6 +76,8 @@ export default function Stock() {
                 <th>Batch</th>
                 <th>Expiry</th>
                 <th>Supplier</th>
+                <th className="num">MRP</th>
+                <th className="num">Purchase</th>
                 <th className="num">On hand</th>
                 <th>Status</th>
                 {canWrite && <th />}
@@ -75,10 +86,15 @@ export default function Stock() {
             <tbody>
               {batches.map((b) => (
                 <tr key={b.id}>
-                  <td><strong>{b.productName}</strong>{b.productSku && <div className="muted small mono">{b.productSku}</div>}</td>
+                  <td>
+                    <strong>{b.productName}</strong>
+                    {b.productSku && <div className="muted small mono">{b.productSku}</div>}
+                  </td>
                   <td className="mono">{b.batchNo}</td>
                   <td>{formatDate(b.expiryDate)}</td>
                   <td>{b.supplierName || '—'}</td>
+                  <td className="num">{money(b.mrp)}</td>
+                  <td className="num">{money(b.purchasePrice)}</td>
                   <td className="num">{b.onHand}</td>
                   <td><StatusBadge status={b.status} /></td>
                   {canWrite && (
@@ -123,18 +139,28 @@ function ReceiveForm({ products, onReceived }) {
     batchNo: '',
     expiryDate: '',
     qty: '',
-    costPrice: '',
+    mrp: '',
+    purchasePrice: '',
   });
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
   useEffect(() => {
     call('suppliers.list', { search: '' }).then(setSuppliers).catch(() => {});
   }, []);
 
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+
+  // Picking a product fills in its MRP; the operator can still change it for this batch.
+  function pickProduct(e) {
+    const product = products.find((p) => p.id === e.target.value);
+    setForm({ ...form, productId: e.target.value, mrp: product ? fromPaise(product.mrp) : '' });
+  }
+
   async function submit(e) {
     e.preventDefault();
-    const costPrice = form.costPrice.trim() ? toCents(form.costPrice) : 0;
-    if (Number.isNaN(costPrice)) return notify('Enter a valid cost price', 'error');
+    const mrp = toPaise(form.mrp);
+    const purchasePrice = form.purchasePrice.trim() ? toPaise(form.purchasePrice) : 0;
+    if (Number.isNaN(mrp) || mrp <= 0) return notify('Enter a valid MRP', 'error');
+    if (Number.isNaN(purchasePrice)) return notify('Enter a valid purchase price', 'error');
     setBusy(true);
     try {
       await call('stock.receive', {
@@ -143,9 +169,10 @@ function ReceiveForm({ products, onReceived }) {
         batchNo: form.batchNo,
         expiryDate: form.expiryDate,
         qty: Number(form.qty),
-        costPrice,
+        mrp,
+        purchasePrice,
       });
-      setForm({ ...form, batchNo: '', expiryDate: '', qty: '', costPrice: '' });
+      setForm({ ...form, batchNo: '', expiryDate: '', qty: '', purchasePrice: '' });
       onReceived();
     } catch (err) {
       notify(err.message, 'error');
@@ -154,13 +181,13 @@ function ReceiveForm({ products, onReceived }) {
     }
   }
 
-  const minExpiry = localDateString();
+  const margin = toPaise(form.mrp) - toPaise(form.purchasePrice || '0');
   return (
     <section className="card receive">
       <h2>Receive stock</h2>
       <form className="form-grid" onSubmit={submit}>
         <Field label="Product" wide>
-          <select value={form.productId} onChange={set('productId')} required>
+          <select value={form.productId} onChange={pickProduct} required>
             <option value="">Choose a product…</option>
             {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -175,18 +202,21 @@ function ReceiveForm({ products, onReceived }) {
           <input value={form.batchNo} onChange={set('batchNo')} required />
         </Field>
         <Field label="Expiry date">
-          <input type="date" min={minExpiry} value={form.expiryDate} onChange={set('expiryDate')} required />
+          <input type="date" min={localDateString()} value={form.expiryDate} onChange={set('expiryDate')} required />
         </Field>
-        <Field label="Quantity">
+        <Field label="Quantity (units)">
           <input type="number" min="1" value={form.qty} onChange={set('qty')} required />
         </Field>
-        <Field label="Cost per unit">
-          <input value={form.costPrice} onChange={set('costPrice')} inputMode="decimal" placeholder="0.00" />
+        <Field label="MRP (₹)" hint="Must match the pack">
+          <input value={form.mrp} onChange={set('mrp')} inputMode="decimal" required />
+        </Field>
+        <Field label="Purchase price per unit (₹)">
+          <input value={form.purchasePrice} onChange={set('purchasePrice')} inputMode="decimal" placeholder="0.00" />
         </Field>
         <div className="form-actions">
           <button className="btn btn-primary" disabled={busy || !form.productId}>Add batch</button>
-          {form.costPrice && !Number.isNaN(toCents(form.costPrice)) && (
-            <span className="muted small">Unit cost {money(toCents(form.costPrice))}</span>
+          {form.mrp && form.purchasePrice && !Number.isNaN(margin) && margin >= 0 && (
+            <span className="muted small">Margin per unit {money(margin)}</span>
           )}
         </div>
       </form>

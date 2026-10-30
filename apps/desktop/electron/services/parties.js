@@ -2,6 +2,7 @@
 
 const { writeRow, getRow } = require('../lib/db');
 const { newId, nowIso, cleanText } = require('../lib/util');
+const { isGstin } = require('../lib/india');
 
 const TABLES = {
   customers: 'customers',
@@ -21,6 +22,7 @@ function mapParty(row) {
     phone: row.phone,
     email: row.email,
     address: row.address,
+    gstin: row.gstin,
     notes: row.notes,
   };
 }
@@ -39,6 +41,8 @@ function saveParty(db, kind, input) {
   const table = tableFor(kind);
   const name = cleanText(input.name);
   if (!name) throw new Error('Name is required');
+  const gstin = cleanText(input.gstin).toUpperCase();
+  if (gstin && !isGstin(gstin)) throw new Error('GSTIN must be 15 characters');
   const existing = input.id ? getRow(db, table, input.id) : null;
   if (input.id && (!existing || existing.deleted)) throw new Error('Record not found');
 
@@ -50,6 +54,7 @@ function saveParty(db, kind, input) {
     phone: cleanText(input.phone) || null,
     email: cleanText(input.email) || null,
     address: cleanText(input.address) || null,
+    gstin: gstin || null,
     notes: cleanText(input.notes) || null,
     created_at: existing?.created_at ?? now,
     updated_at: now,

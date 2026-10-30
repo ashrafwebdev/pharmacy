@@ -7,7 +7,7 @@ const KINDS = {
   customers: { label: 'Customers', perm: 'parties.write', noun: 'customer' },
   suppliers: { label: 'Suppliers', perm: 'catalog.write', noun: 'supplier' },
 };
-const BLANK = { id: null, name: '', phone: '', email: '', address: '', notes: '' };
+const BLANK = { id: null, name: '', phone: '', email: '', address: '', gstin: '', notes: '' };
 
 export default function Directory() {
   const { user, notify } = useApp();
@@ -67,14 +67,14 @@ export default function Directory() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Name</th><th>Phone</th><th>Email</th><th>Address</th>{canWrite && <th />}</tr>
+              <tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Address</th>{canWrite && <th />}</tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td><strong>{row.name}</strong></td>
                   <td>{row.phone || '—'}</td>
-                  <td>{row.email || '—'}</td>
+                  <td className="mono">{row.gstin || '—'}</td>
                   <td>{row.address || '—'}</td>
                   {canWrite && (
                     <td className="row-actions">
@@ -144,6 +144,9 @@ function PartyForm({ kind, noun, initial, onClose, onSaved }) {
         </Field>
         <Field label="Email">
           <input type="email" value={form.email ?? ''} onChange={set('email')} />
+        </Field>
+        <Field label="GSTIN" hint={kind === 'suppliers' ? 'Needed to claim input tax credit' : 'Only for business buyers who need it on invoices'}>
+          <input value={form.gstin ?? ''} onChange={set('gstin')} maxLength={15} style={{ textTransform: 'uppercase' }} />
         </Field>
         <Field label="Address" wide>
           <input value={form.address ?? ''} onChange={set('address')} />

@@ -56,22 +56,23 @@ test('two branches converge through the server', async () => {
   const product = await call(counter.api, 'products.save', {
     name: 'Amoxicillin 250mg',
     sku: '890200000002',
-    unitPrice: 400,
-    costPrice: 200,
+    hsnCode: '3004',
+    gstRate: 12,
+    schedule: 'OTC',
+    mrp: 40000,
     reorderLevel: 5,
-    requiresPrescription: false,
   });
   await call(counter.api, 'stock.receive', {
     productId: product.id,
     batchNo: 'AMX-01',
     expiryDate: expiry,
     qty: 10,
-    costPrice: 200,
+    purchasePrice: 20000,
   });
   await call(counter.api, 'sales.create', {
     items: [{ productId: product.id, qty: 3 }],
     paymentMethod: 'cash',
-    amountPaid: 1200,
+    amountPaid: 120000,
   });
 
   const pushed = await counter.sync.syncNow();
@@ -85,7 +86,7 @@ test('two branches converge through the server', async () => {
   const today = localDate();
   const sales = await call(branch.api, 'sales.list', { from: today, to: today });
   assert.equal(sales.length, 1);
-  assert.equal(sales[0].total, 1200);
+  assert.equal(sales[0].total, 120000);
 
   // The branch sells from the synced stock; the counter receives that sale back.
   await call(branch.api, 'sales.create', {
@@ -105,20 +106,21 @@ test('an offline branch keeps selling and syncs once the server is back', async 
   const product = await call(offline.api, 'products.save', {
     name: 'Cetirizine 10mg',
     sku: '890300000003',
-    unitPrice: 150,
-    costPrice: 60,
+    hsnCode: '3004',
+    gstRate: 12,
+    mrp: 15000,
   });
   await call(offline.api, 'stock.receive', {
     productId: product.id,
     batchNo: 'CTZ-7',
     expiryDate: expiry,
     qty: 20,
-    costPrice: 60,
+    purchasePrice: 6000,
   });
   await call(offline.api, 'sales.create', {
     items: [{ productId: product.id, qty: 4 }],
     paymentMethod: 'cash',
-    amountPaid: 600,
+    amountPaid: 60000,
   });
 
   const failed = await offline.sync.syncNow();

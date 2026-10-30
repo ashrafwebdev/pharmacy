@@ -241,6 +241,33 @@ input[type='checkbox'] { width: 16px; height: 16px; }
 .receipt .totals { margin-top: 8px; }
 .receipt-foot { text-align: center; margin-top: 12px; }
 
+/* India: tax-invoice and prescription blocks */
+.tile-tags { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tag-soft {
+  font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+  background: var(--brand-soft); color: var(--brand);
+}
+.rx-box {
+  border: 1px solid #fde68a; background: #fffbeb; border-radius: 8px; padding: 10px 12px; margin: 0;
+}
+.rx-box legend { font-weight: 700; font-size: 13px; padding: 0 4px; color: #78350f; }
+.rx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+.rx-grid .wide { grid-column: 1 / -1; }
+.total-line td { border-top: 2px solid var(--line); }
+.receipt-name { font-size: 15px; }
+.receipt-title { font-weight: 700; letter-spacing: 0.08em; margin-top: 6px; }
+.receipt-meta { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; font-size: 12px; }
+.receipt-meta div { display: flex; justify-content: space-between; gap: 10px; }
+.receipt-meta span:first-child { color: #555; }
+.receipt-items th { font-size: 11px; padding: 4px 2px; }
+.receipt-items td { padding: 4px 2px; }
+.receipt .words { font-style: italic; margin: 8px 0; font-size: 12px; }
+.gst-table { margin-top: 8px; font-size: 12px; }
+.gst-table th, .gst-table td { padding: 3px 2px; }
+.rx-block { margin-top: 10px; font-size: 12px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.receipt-sign { margin-top: 10px; font-size: 12px; text-align: right; }
+.receipt { max-width: 380px; }
+
 @media print {
   body { background: #fff; }
   .no-print { display: none !important; }

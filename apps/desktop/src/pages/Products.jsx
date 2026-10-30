@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { call, can } from '../lib/api';
 import { useApp, useMoney } from '../lib/context';
-import { fromCents, toCents } from '../lib/format';
+import { fromPaise, toPaise, GST_RATES, SCHEDULES } from '../lib/format';
 import { Empty, Field, Modal, PageHeader } from '../components/ui';
 
 const BLANK = {
@@ -11,10 +11,11 @@ const BLANK = {
   genericName: '',
   category: '',
   manufacturer: '',
-  unitPrice: '',
-  costPrice: '',
+  hsnCode: '',
+  gstRate: 12,
+  schedule: 'OTC',
+  mrp: '',
   reorderLevel: '10',
-  requiresPrescription: false,
 };
 
 export default function Products() {
@@ -25,7 +26,8 @@ export default function Products() {
   const [rows, setRows] = useState([]);
   const [editing, setEditing] = useState(null);
 
-  const load = () => call('products.list', { search, limit: 500 }).then(setRows).catch((e) => notify(e.message, 'error'));
+  const load = () =>
+    call('products.list', { search, limit: 500 }).then(setRows).catch((e) => notify(e.message, 'error'));
 
   useEffect(() => {
     const timer = setTimeout(load, 200);
@@ -48,13 +50,13 @@ export default function Products() {
     <>
       <PageHeader
         title="Products"
-        subtitle="Medicines and other items sold at the counter"
+        subtitle="Medicines and other items, with MRP, GST and drug schedule"
         actions={canWrite && <button className="btn btn-primary" onClick={() => setEditing(BLANK)}>New product</button>}
       />
       <div className="toolbar">
         <input
           className="search-input"
-          placeholder="Search by name, generic, barcode or maker"
+          placeholder="Search by name, generic name, barcode or company"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -70,10 +72,11 @@ export default function Products() {
                 <th>Barcode</th>
                 <th>Product</th>
                 <th>Generic / category</th>
-                <th className="num">Price</th>
-                <th className="num">Cost</th>
+                <th>HSN</th>
+                <th className="num">MRP</th>
+                <th className="num">GST</th>
+                <th>Schedule</th>
                 <th className="num">In stock</th>
-                <th>Rx</th>
                 {canWrite && <th />}
               </tr>
             </thead>
@@ -81,18 +84,20 @@ export default function Products() {
               {rows.map((p) => (
                 <tr key={p.id}>
                   <td className="mono">{p.sku || '—'}</td>
-                  <td><strong>{p.name}</strong>{p.manufacturer && <div className="muted small">{p.manufacturer}</div>}</td>
+                  <td>
+                    <strong>{p.name}</strong>
+                    {p.manufacturer && <div className="muted small">{p.manufacturer}</div>}
+                  </td>
                   <td>{p.genericName || p.category || '—'}</td>
-                  <td className="num">{money(p.unitPrice)}</td>
-                  <td className="num">{money(p.costPrice)}</td>
+                  <td className="mono">{p.hsnCode || '—'}</td>
+                  <td className="num">{money(p.mrp)}</td>
+                  <td className="num">{p.gstRate}%</td>
+                  <td>{p.schedule === 'OTC' ? '—' : <span className="tag">{p.schedule}</span>}</td>
                   <td className={`num${p.onHand <= p.reorderLevel && p.reorderLevel > 0 ? ' error' : ''}`}>{p.onHand}</td>
-                  <td>{p.requiresPrescription ? <span className="tag">Rx</span> : ''}</td>
                   {canWrite && (
                     <td className="row-actions">
                       <button className="btn btn-ghost btn-small" onClick={() => setEditing(toForm(p))}>Edit</button>
-                      {can(user, 'catalog.write') && (
-                        <button className="btn btn-ghost btn-small" onClick={() => remove(p)}>Remove</button>
-                      )}
+                      <button className="btn btn-ghost btn-small" onClick={() => remove(p)}>Remove</button>
                     </td>
                   )}
                 </tr>
@@ -125,10 +130,11 @@ function toForm(p) {
     genericName: p.genericName ?? '',
     category: p.category ?? '',
     manufacturer: p.manufacturer ?? '',
-    unitPrice: fromCents(p.unitPrice),
-    costPrice: fromCents(p.costPrice),
+    hsnCode: p.hsnCode ?? '',
+    gstRate: p.gstRate,
+    schedule: p.schedule,
+    mrp: fromPaise(p.mrp),
     reorderLevel: String(p.reorderLevel),
-    requiresPrescription: p.requiresPrescription,
   };
 }
 
@@ -136,22 +142,21 @@ function ProductForm({ initial, onClose, onSaved }) {
   const { notify } = useApp();
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
   async function submit(e) {
     e.preventDefault();
-    const unitPrice = toCents(form.unitPrice);
-    const costPrice = form.costPrice.trim() ? toCents(form.costPrice) : 0;
+    const mrp = toPaise(form.mrp);
     const reorderLevel = Number(form.reorderLevel || 0);
-    if (Number.isNaN(unitPrice) || Number.isNaN(costPrice)) return notify('Enter valid prices', 'error');
+    if (Number.isNaN(mrp) || mrp <= 0) return notify('Enter a valid MRP', 'error');
     if (!Number.isInteger(reorderLevel) || reorderLevel < 0) return notify('Reorder level must be 0 or more', 'error');
 
     setBusy(true);
     try {
       const saved = await call('products.save', {
         ...form,
-        unitPrice,
-        costPrice,
+        gstRate: Number(form.gstRate),
+        mrp,
         reorderLevel,
       });
       onSaved(saved);
@@ -183,25 +188,31 @@ function ProductForm({ initial, onClose, onSaved }) {
         <Field label="Generic name">
           <input value={form.genericName} onChange={set('genericName')} />
         </Field>
+        <Field label="Company / manufacturer">
+          <input value={form.manufacturer} onChange={set('manufacturer')} />
+        </Field>
         <Field label="Category">
           <input value={form.category} onChange={set('category')} placeholder="e.g. Analgesic" />
         </Field>
-        <Field label="Manufacturer">
-          <input value={form.manufacturer} onChange={set('manufacturer')} />
+        <Field label="HSN code" hint="4, 6 or 8 digits, printed on the GST invoice">
+          <input value={form.hsnCode} onChange={set('hsnCode')} inputMode="numeric" placeholder="3004" />
         </Field>
-        <Field label="Selling price">
-          <input value={form.unitPrice} onChange={set('unitPrice')} inputMode="decimal" required />
+        <Field label="MRP (₹)" hint="Printed on the pack, GST included">
+          <input value={form.mrp} onChange={set('mrp')} inputMode="decimal" required />
         </Field>
-        <Field label="Cost price">
-          <input value={form.costPrice} onChange={set('costPrice')} inputMode="decimal" />
+        <Field label="GST rate">
+          <select value={form.gstRate} onChange={set('gstRate')}>
+            {GST_RATES.map((rate) => <option key={rate} value={rate}>{rate}%</option>)}
+          </select>
+        </Field>
+        <Field label="Drug schedule">
+          <select value={form.schedule} onChange={set('schedule')}>
+            {SCHEDULES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
         </Field>
         <Field label="Reorder level" hint="Alert when stock falls to this quantity">
           <input value={form.reorderLevel} onChange={set('reorderLevel')} inputMode="numeric" />
         </Field>
-        <label className="check wide">
-          <input type="checkbox" checked={form.requiresPrescription} onChange={set('requiresPrescription')} />
-          Prescription only (requires verification at sale)
-        </label>
       </form>
     </Modal>
   );

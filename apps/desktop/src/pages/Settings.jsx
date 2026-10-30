@@ -38,7 +38,7 @@ function BusinessSettings() {
     try {
       await call('settings.save', { ...form, expiryWarningDays: Number(form.expiryWarningDays) });
       await reloadSettings();
-      notify('Shop settings saved');
+      notify('Shop details saved');
     } catch (err) {
       notify(err.message, 'error');
     } finally {
@@ -48,16 +48,37 @@ function BusinessSettings() {
 
   return (
     <section className="card">
-      <h2>Shop details</h2>
+      <h2>Shop details (printed on every invoice)</h2>
       <form className="form-grid" onSubmit={save}>
         <Field label="Pharmacy name" wide>
           <input value={form.pharmacyName} onChange={set('pharmacyName')} required />
         </Field>
-        <Field label="Currency code" hint="For example USD, EUR, GBP, INR">
-          <input value={form.currency} onChange={set('currency')} maxLength={3} required />
+        <Field label="Address" wide>
+          <input value={form.address} onChange={set('address')} />
+        </Field>
+        <Field label="Phone">
+          <input value={form.phone} onChange={set('phone')} inputMode="tel" />
+        </Field>
+        <Field label="GSTIN" hint="15 characters. Leave blank if not registered">
+          <input value={form.gstin} onChange={set('gstin')} maxLength={15} style={{ textTransform: 'uppercase' }} />
+        </Field>
+        <Field label="Drug licence (Form 20)" hint="Retail sale licence number">
+          <input value={form.drugLicence20} onChange={set('drugLicence20')} />
+        </Field>
+        <Field label="Drug licence (Form 21)" hint="Retail sale licence number, second licence if held">
+          <input value={form.drugLicence21} onChange={set('drugLicence21')} />
+        </Field>
+        <Field label="Registered pharmacist">
+          <input value={form.pharmacistName} onChange={set('pharmacistName')} />
+        </Field>
+        <Field label="Pharmacist registration no.">
+          <input value={form.pharmacistRegNo} onChange={set('pharmacistRegNo')} />
         </Field>
         <Field label="Expiry warning (days)">
           <input type="number" min="1" max="730" value={form.expiryWarningDays} onChange={set('expiryWarningDays')} required />
+        </Field>
+        <Field label="This till's invoice code" hint="Unique per till, e.g. C1 or C2. Keep it unchanged once invoices exist">
+          <input value={form.counterCode} onChange={set('counterCode')} maxLength={12} style={{ textTransform: 'uppercase' }} required />
         </Field>
         <Field label="Receipt footer" wide>
           <input value={form.receiptFooter} onChange={set('receiptFooter')} />

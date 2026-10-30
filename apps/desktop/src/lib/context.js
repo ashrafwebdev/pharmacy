@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import { formatMoney } from './format';
+import { formatRupees } from './format';
 
 export const AppContext = createContext(null);
 
@@ -9,7 +9,7 @@ export function useApp() {
   return value;
 }
 
+/** Formats paise as rupees, e.g. 12345600 -> ₹1,23,456.00 */
 export function useMoney() {
-  const { settings } = useApp();
-  return (cents) => formatMoney(cents, settings?.currency ?? 'USD');
+  return formatRupees;
 }
